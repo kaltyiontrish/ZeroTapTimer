@@ -1,0 +1,14 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# 40 MB speech model, fetched manually. See README: Voice control.
+/app/src/main/assets/vosk-model-en-us
