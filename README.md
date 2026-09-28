@@ -2,11 +2,12 @@
 
 # ZeroTapTimer (Human Description) 
 Its a basic Timer for gym exercises that allows you to create several timers and jump between them with voice commands.
-Start - Starts timer
-Pause - Pause timer
-Continue/Resume - Resumes the timer
-Reset - Reset timer and automatically starts 
-Stop - Reset timer and waits for human instructions.
+// Start - Starts timer
+// Pause - Pause timer
+// Continue/Resume - Resumes the timer
+// Reset - Reset timer and automatically starts 
+// Stop - Reset timer and waits for human instructions.
+
 After the end of any timer it starts counting the rest period.
 Thats basically it! There are more features but you have to read the AI bs bellow! ;)
 
