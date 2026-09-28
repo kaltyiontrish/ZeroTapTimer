@@ -1,3 +1,8 @@
+<img width="347" height="651" alt="image" src="https://github.com/user-attachments/assets/fa3c6347-60e1-4e88-8cdf-0cde6d425a47" />
+
+
+
+
 # ZeroTapTimer
 
 An Android interval timer for workouts. Kotlin + Jetpack Compose, **no third-party
