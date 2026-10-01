@@ -12,3 +12,6 @@ local.properties
 
 # 40 MB speech model, fetched manually. See README: Voice control.
 /app/src/main/assets/vosk-model-en-us
+
+# Scratch output from the screenshot tool, not part of the app.
+/UI PrintScreens/

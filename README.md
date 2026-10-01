@@ -15,24 +15,28 @@ Thats basically it! There are more features but you have to read the AI bs bello
 # ZeroTapTimer
 
 An Android interval timer for workouts. Kotlin + Jetpack Compose, **no third-party
-dependencies and no binary assets** — the end-of-timer sounds are synthesized in code.
+dependencies** — Vosk is the one library, and it runs fully on-device. The end-of-timer
+sounds are nine recorded MP3s in `assets/sounds` (about 550 KB), decoded by the
+platform's own `MediaPlayer`.
 
 ## What it does
 
 - **One timer at a time, rest on autopilot.** Tap a button at the top to load a timer.
-  When it reaches zero, rest starts by itself — no tapping mid-set — and when rest runs
-  out the same timer reloads, ready for the next go. This is a menu of timers to pick
+  When it reaches zero, rest starts by itself — no tapping mid-set — and rest counts
+  **up** and only ends when you start the next timer. This is a menu of timers to pick
   from, not a sequence that plays through: nothing auto-advances, because nothing is
   ever played in order.
 - **Your timer list.** Add, retime and remove timers in the editor. Each is just a length
   in seconds — there are no named muscle groups, because the UI never showed one.
-- **A rest reminder**, optionally beeping every 15, 30 or 60 seconds so a long rest is
-  more than a number counting up. Off by default.
-- **8 end-of-timer sounds** (chime, gong, bleep, double ping, rise, fall, wood block,
-  horn), selectable with a volume slider, and each is previewed when you pick it.
+- **A rest reminder**, optionally beeping on a preset or custom interval so a long rest
+  is more than a number counting up. It repeats until you pause, stop or restart.
+  Off by default.
+- **9 end-of-timer sounds** (bell, bell 2, buzzer, double bell, fah, notification 1,
+  pop, sus, wow), chosen from a dropdown with a volume slider, each previewed as you
+  pick it.
 - **Voice control, always on and fully offline** — "timer" to start, "pause",
-  "continue", "restart", "stop", plus **"one" to "twenty"** to jump straight to a
-  timer. The mic stays open permanently, so no word falls through a gap.
+  "continue", "restart", "stop", plus **"swap one" … "swap twenty"** to jump straight
+  to a timer. The mic stays open permanently, so no word falls through a gap.
 - **Cues you can feel and see**: a haptic pulse on every transition, and a dial that
   unwinds clockwise and turns from red to green while resting.
 - Screen stays awake and the system bars hide while a set is running.
@@ -87,8 +91,7 @@ app/src/main/java/com/timergym/
   data/Repo.kt             SharedPreferences + org.json
   timer/TimerEngine.kt     PURE state machine: exercise -> rest -> ready, plus reminders
   timer/TimerViewModel.kt  drives the engine, owns sound + haptics
-  sound/Cues.kt           PURE cue synthesis: partials, envelopes, PCM out
-  sound/SoundPlayer.kt    AudioTrack streaming; owns the hardware, not the waveform
+  sound/SoundPlayer.kt    MediaPlayer off the main thread; owns the hardware, not the file
   voice/Commands.kt        PURE phrase -> command matching, and the Vosk grammar
   voice/VoiceController.kt AudioRecord stream + Vosk, all Vosk calls in one file
   ui/                      Theme, TimerScreen, EditTimers, SettingsSheet
@@ -110,8 +113,19 @@ and no gap in which a word is missed.
 It is unpacked to internal storage on first run. If the folder is missing the app says
 "Voice model missing from the app" rather than failing quietly.
 
-Commands: **timer**, **start**, **pause**, **continue**/**resume**, **restart**/**reset**,
-**stop**, and **one** … **twenty** to load that exercise. English only.
+Commands: **timer**/**start**, **pause**, **continue**/**resume**, **restart**/**reset**,
+**stop**, and **"swap one"** … **"swap twenty"** to load that timer. English only.
+
+Numbers need the "swap" in front. With bare numbers in a restricted grammar the decoder
+had to emit *something*, and a number word was the least bad candidate — a beat of music
+was enough to trigger one. Requiring a two-word phrase means noise has to complete the
+phrase before anything fires. `[unk]` gives the decoder somewhere to put speech that is
+not a command at all, rather than forcing a guess.
+
+**Settings → voice feedback** shows what the recognizer actually heard, live: the phrase
+it emitted, the frame and utterance counters, and a mic level bar. If a command is not
+landing, look there first — it distinguishes "did not hear it" from "heard it and got it
+wrong".
 
 ## Known limits
 
