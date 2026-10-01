@@ -150,11 +150,12 @@ private fun App(vm: TimerViewModel) {
                     title = {},
                     navigationIcon = {
                         TextButton(onClick = { screen = Screen.EDIT }) {
-                            Text("Edit")
-                            Spacer(Modifier.width(6.dp))
-                            // Null, because the Text beside it is already the label;
-                            // otherwise a screen reader announces "Edit, edit".
+                            // Icon first, then the word. Null description, because the Text
+                            // beside it is already the label; otherwise a screen reader
+                            // announces "Edit, edit".
                             Icon(Icons.Filled.Edit, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Edit")
                         }
                     },
                     actions = {
@@ -186,7 +187,7 @@ private fun App(vm: TimerViewModel) {
                 settings = settings,
                 onToggle = vm::toggle,
                 onSelect = vm::select,
-                onRestart = vm::restart,
+                onStop = vm::stop,
                 onToggleMic = {
                     if (settings.voice) vm.setVoiceEnabled(false)
                     else micPermission.launch(Manifest.permission.RECORD_AUDIO)
@@ -215,6 +216,7 @@ private fun App(vm: TimerViewModel) {
         ) {
             SettingsSheet(
                 settings = settings,
+                session = state,
                 micListening = micListening,
                 debugTools = vm.debugTools,
                 timeScale = timeScale,

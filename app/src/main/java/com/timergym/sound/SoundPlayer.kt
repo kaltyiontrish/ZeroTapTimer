@@ -1,132 +1,110 @@
 package com.timergym.sound
 
+import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioFormat
-import android.media.AudioManager
-import android.media.AudioTrack
+import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.timergym.data.Sound
+import java.util.concurrent.Executors
 
 /**
- * Plays the end-of-timer cues through AudioTrack. The waveform itself is [Cues]; this
- * class owns the hardware, the streaming buffer and the sample rate.
+ * Plays the end-of-timer cues, which are MP3s in `assets/sounds`.
  *
- * Why not audio files: a handful of short cues are a few dozen lines of arithmetic each,
- * and generating them keeps the repository free of binary assets while staying tweakable.
- * A file-based implementation can replace this behind the same [play] signature later.
+ * The platform decodes them ([MediaPlayer]) rather than this class synthesizing them, so
+ * there is no waveform code to maintain and nothing to hand-tune.
  *
- * The cues go out on the ALARM stream, so the phone's Alarm volume bar is the one that
- * governs them, and the in-app slider is a multiplier on top of that. The buffer is
- * rendered at the device's *native* output rate because asking for a rate the output
- * cannot take can stop AudioTrack initializing, which is a silent failure.
+ * Playback happens on [audio], never the main thread. `MediaPlayer.prepare()` blocks while
+ * it reads and decodes the file, and the tick loop that triggers a cue runs on
+ * Dispatchers.Main; doing that inline froze the whole UI, countdown included, for as long
+ * as the decode took.
+ *
+ * Cues are tagged USAGE_ALARM so the phone's Alarm volume bar governs them. An app can
+ * never exceed the system volume, so that bar is the ceiling.
  */
-class SoundPlayer {
+class SoundPlayer(context: Context) {
 
-    /**
-     * Match the hardware. The cues go to the media stream, which AudioManager calls
-     * STREAM_MUSIC. 44100 is only assumed when the device will not say, because asking
-     * for a rate the output cannot take can stop AudioTrack initializing.
-     */
-    private val sampleRate: Int =
-        runCatching { AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC) }
-            .getOrNull()
-            ?.takeIf { it > 0 }
-            ?: 44100
+    private val assets = context.applicationContext.assets
+
+    /** Guards [live], which the audio thread and the main thread both touch. */
+    private val lock = Any()
+    private var live: MediaPlayer? = null
 
     private val main = Handler(Looper.getMainLooper())
-    private val cache = HashMap<Sound, ShortArray>()
-    private val live = ArrayList<AudioTrack>()
 
-    fun play(sound: Sound, volume: Float) = playCue(sound, volume)
+    private val audio = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "cue-audio").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 }
+    }
+
+    /** Fire and forget: returns immediately and the cue plays on [audio]. */
+    fun play(sound: Sound, volume: Float) {
+        audio.execute { playNow(sound, volume) }
+    }
 
     fun release() {
         main.removeCallbacksAndMessages(null)
-        live.toList().forEach { stop(it) }
-        cache.clear()
+        audio.shutdownNow()
+        stopLive()
     }
 
-    private fun playCue(sound: Sound, volume: Float) {
-        val samples = cache.getOrPut(sound) { Cues.render(sound, sampleRate) }
-        if (samples.isEmpty()) {
-            Log.w(TAG, "cue $sound rendered no samples")
-            return
-        }
+    private fun playNow(sound: Sound, volume: Float) {
         // A new cue replaces the old one, so a long tail is cut cleanly.
-        live.toList().forEach { stop(it) }
-
-        val bytes = ByteArray(samples.size * 2)
-        for (i in samples.indices) {
-            val v = samples[i].toInt()
-            bytes[i * 2] = (v and 0xFF).toByte()
-            bytes[i * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+        stopLive()
+        val player = MediaPlayer()
+        try {
+            // openFd needs the asset stored uncompressed. MP3 is already compressed, and
+            // aapt will not compress it a second time.
+            assets.openFd(sound.asset).use { afd ->
+                // Must be set before prepare(): this is what routes the cue to the alarm
+                // stream rather than the media one.
+                player.setAudioAttributes(AUDIO_ATTRS)
+                player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            }
+            player.prepare()
+            // Recorded as live before anything else can throw, so the catch below can
+            // always release it.
+            synchronized(lock) { live = player }
+            val gain = volume.coerceIn(0f, 1f)
+            player.setVolume(gain, gain)
+            player.setOnCompletionListener { finish(player) }
+            player.start()
+            // Safety net. Normally completion fires and this is a no-op; without it, a cue
+            // that never reported completion would leak a native player.
+            main.postDelayed({ finish(player) }, RELEASE_AFTER_MS)
+        } catch (e: Exception) {
+            Log.e(TAG, "could not play ${sound.name} from ${sound.asset}", e)
+            finish(player)
         }
-
-        val track = runCatching { buildTrack() }.getOrElse {
-            Log.e(TAG, "could not build AudioTrack for $sound", it)
-            return
-        }
-        if (track.state != AudioTrack.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioTrack not initialized for $sound (state=${track.state})")
-            track.release()
-            return
-        }
-        live += track
-        // The platform's own per-track gain, so the slider costs no re-render and no copy
-        // of the cached buffer. Fails quietly: a missing volume is far better than a
-        // missing cue, and a silent failure here is invisible either way.
-        runCatching { track.setVolume(volume.coerceIn(0f, 1f)) }
-            .onFailure { Log.w(TAG, "setVolume ignored for $sound", it) }
-        // MODE_STREAM: play() first, then push the buffer. MODE_STATIC looked tidier
-        // but silently failed to play on some devices, which is unfixable without logs.
-        runCatching {
-            track.play()
-            val written = track.write(bytes, 0, bytes.size)
-            if (written < bytes.size) Log.w(TAG, "$sound short write $written/${bytes.size}")
-        }.onFailure {
-            Log.e(TAG, "playback failed for $sound", it)
-            stop(track)
-            return
-        }
-        val durationMs = samples.size * 1000L / sampleRate
-        main.postDelayed({ stop(track) }, durationMs + 200L)
-        Log.i(TAG, "playing $sound for ${durationMs}ms at ${sampleRate}Hz")
     }
 
-    private fun buildTrack(): AudioTrack =
-        AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    // USAGE_ALARM is what decides which of the phone's volume bars applies,
-                    // and it is the biggest single lever on how loud the cue can get. The
-                    // alarm stream is also the one least disturbed by media ducking and by
-                    // notification interruption, and it is usually the bar left at maximum.
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(STREAM_BUFFER_BYTES)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
+    /**
+     * Release and forget. Safe to call repeatedly and from either thread: only the first
+     * caller to find [live] pointing at this player does the release, so the completion
+     * listener and the safety net cannot double-free.
+     */
+    private fun finish(player: MediaPlayer) {
+        synchronized(lock) {
+            if (live !== player) return
+            live = null
+        }
+        runCatching { player.release() }
+    }
 
-    private fun stop(track: AudioTrack?) {
-        if (track == null) return
-        live -= track
-        runCatching { track.stop() }
-        runCatching { track.release() }
+    private fun stopLive() {
+        val current = synchronized(lock) { live }
+        if (current != null) finish(current)
     }
 
     private companion object {
         const val TAG = "SoundPlayer"
-        /** Bigger than any cue we render, so one write never blocks. */
-        const val STREAM_BUFFER_BYTES = 64 * 1024
+
+        /** Ceiling for the safety net. Every cue here is a couple of seconds at most. */
+        const val RELEASE_AFTER_MS = 15_000L
+
+        val AUDIO_ATTRS: AudioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
     }
 }

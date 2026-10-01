@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenuItem
@@ -35,11 +37,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.timergym.data.AppSettings
 import com.timergym.data.Sound
 import com.timergym.voice.VoiceCommand
 import com.timergym.voice.match
+import com.timergym.timer.SessionState
 import kotlin.math.roundToInt
 
 /** Rest reminder intervals offered in Settings. 0 means off. */
@@ -48,6 +52,7 @@ private val REST_REMINDER_CHOICES = listOf(0, 15, 30, 60)
 @Composable
 fun SettingsSheet(
     settings: AppSettings,
+    session: SessionState,
     micListening: Boolean,
     debugTools: Boolean,
     timeScale: Float,
@@ -66,6 +71,9 @@ fun SettingsSheet(
     onDebugCommand: (VoiceCommand) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Draft text for the custom interval only. The committed value lives in settings.
+    var customText by remember { mutableStateOf("") }
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -132,6 +140,51 @@ fun SettingsSheet(
                 )
             }
         }
+        Spacer(Modifier.height(6.dp))
+        // Custom gets its own line with the field in front of it. On the preset row its
+        // label wrapped to "Custo / m", because the four chips took all the width.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = customText,
+                onValueChange = { raw ->
+                    val digits = raw.filter { it.isDigit() }.take(3)
+                    customText = digits
+                    // Commit as it is typed: there is no save button, and an uncommitted
+                    // value here would be a setting the UI shows but the timer ignores.
+                    digits.toIntOrNull()?.let(onRestBeepSeconds)
+                },
+                label = { Text("Every (s)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.width(150.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedContainerColor = Color.Transparent,
+                ),
+            )
+            // Selected from the stored value, not a local flag: typing a number commits it
+            // and selects this automatically, and picking a preset deselects it. One source
+            // of truth, so the chip cannot claim something the timer is not actually doing.
+            FilterChip(
+                selected = settings.restBeepSeconds > 0 &&
+                    settings.restBeepSeconds !in REST_REMINDER_CHOICES,
+                onClick = { onRestBeepSeconds(customText.toIntOrNull() ?: 45) },
+                label = { Text("Custom") },
+            )
+        }
+        if (settings.restBeepSeconds > 0 &&
+            settings.restBeepSeconds !in REST_REMINDER_CHOICES
+        ) {
+            Text(
+                text = "Keeps beeping every interval until the timer is stopped. Rest is " +
+                    "never timed, so nothing ends it but you.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         Spacer(Modifier.height(8.dp))
         HorizontalDivider()
@@ -164,6 +217,15 @@ fun SettingsSheet(
         if (settings.voiceDebug) {
             Spacer(Modifier.height(4.dp))
             Text("Diagnostics", style = MaterialTheme.typography.titleSmall)
+            // The engine's own state, on screen. A command that appears to do nothing is
+            // the hardest kind of bug to report, and this answers "what state was it
+            // actually in" without needing a debugger attached.
+            Text(
+                text = "run=${session.runState}  stage=${session.stage}  " +
+                    "timer=${session.exerciseRemainingMs}ms  rest=${session.restElapsedMs}ms",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             // Status and mic state on one row: they were separate lines and read as two
             // unrelated facts, when in practice the mic state usually explains the status.
             Text(

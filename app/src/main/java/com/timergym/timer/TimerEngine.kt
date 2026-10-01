@@ -11,9 +11,6 @@ sealed interface SessionEvent {
     /** The exercise reached zero. Rest begins counting up on its own, with no tap. */
     data class ExerciseEnded(val index: Int, val step: Step) : SessionEvent
 
-    /** A fresh exercise was loaded, which also zeroes the rest counter. */
-    data class ExerciseStarted(val index: Int, val step: Step) : SessionEvent
-
     /** A rest period has been running for a whole multiple of the reminder interval. */
     data class RestReminder(val elapsedMs: Long) : SessionEvent
 }
@@ -39,9 +36,23 @@ data class SessionState(
  * [TimerEngineTest] run on the desktop JVM in about a second. The caller supplies the
  * clock (SystemClock.elapsedRealtime in the app, a fake in tests).
  *
- * Rest is deliberately open-ended: it counts up and only ends when the user starts the
- * next exercise. Each tick recomputes from the real clock rather than decrementing a
- * counter, so the display cannot drift.
+ * Two independent axes, and keeping them independent is the whole design:
+ *
+ *  - [RunState] asks whether the clock is moving.
+ *  - [Stage] asks which counter the dial is showing.
+ *
+ * **Pausing and continuing never change the stage.** A rest resumes as a rest. That is
+ * what "pause and continue work in both modes" means, and it is enforced by construction:
+ * [pause] and [resume] only ever write [RunState].
+ *
+ * Stage therefore has exactly four writers — the clock reaching zero, [restart], [reset]
+ * and [select]. Everything else is stage-blind. `IDLE` implies `EXERCISE` because
+ * [ready] is the only way into that state and it always says so.
+ *
+ * Rest is deliberately open-ended. It counts up forever and has no ceiling; the only ways
+ * out are the user stopping the timer or asking for the exercise again. Each tick
+ * recomputes from the real clock rather than decrementing a counter, so the display
+ * cannot drift and a stalled frame cannot lose time.
  */
 class TimerEngine(
     steps: List<Step>,
@@ -67,8 +78,11 @@ class TimerEngine(
     }
 
     private companion object {
-        /** Ceiling on reminders from one tick, so a long stall cannot produce a burst. */
-        const val MAX_REMINDERS = 3
+        /**
+         * Ceiling on reminders from one tick, so a long stall cannot produce a burst.
+         * Long, not Int: it is compared against a tick budget in milliseconds.
+         */
+        const val MAX_REMINDERS = 3L
     }
 
     var state: SessionState = ready(0)
@@ -83,20 +97,54 @@ class TimerEngine(
         lastTick = now
     }
 
-    fun start(now: Long): List<SessionEvent> {
-        if (state.runState == RunState.RUNNING) return emptyList()
-        val events = mutableListOf<SessionEvent>()
-        // Pressing play during rest means "I am done resting": go back to the exercise.
-        if (state.stage == Stage.REST) {
-            val step = steps[state.exerciseIndex]
-            state = ready(state.exerciseIndex)
-            events += SessionEvent.ExerciseStarted(state.exerciseIndex, step)
-        } else if (state.runState == RunState.IDLE) {
-            events += SessionEvent.ExerciseStarted(state.exerciseIndex, steps[state.exerciseIndex])
-        }
+    /**
+     * Begin a session. IDLE only, and deliberately blind to the stage.
+     *
+     * This used to carry a branch that left a rest and reloaded the exercise, which is
+     * what made "start" mean two different things depending on where the user was. Stage
+     * now has exactly four writers — the clock reaching zero, [restart], [reset] and
+     * [select] — and nothing else can move it.
+     *
+     * IDLE implies EXERCISE, because [ready] is the only way in and it always says so,
+     * so this never has to think about the stage at all.
+     */
+    fun start(now: Long) {
+        if (state.runState != RunState.IDLE) return
         state = state.copy(runState = RunState.RUNNING)
         lastTick = now
-        return events
+    }
+
+    /**
+     * Make sure the clock is moving, without changing the stage.
+     *
+     * "Continue" is this, and so is "start" away from a rest. From a rest it resumes the
+     * rest, not a new exercise: the rest runs until the user stops it, and nothing about
+     * resuming may quietly end it.
+     */
+    fun resume(now: Long): List<SessionEvent> = when (state.runState) {
+        RunState.RUNNING -> emptyList()
+        RunState.PAUSED -> {
+            state = state.copy(runState = RunState.RUNNING)
+            lastTick = now
+            emptyList()
+        }
+        // IDLE implies EXERCISE, so resuming an idle timer is just starting it.
+        RunState.IDLE -> {
+            start(now)
+            emptyList()
+        }
+    }
+
+    /**
+     * Run this exercise again from the top, leaving any rest.
+     *
+     * Voice "start" and "restart" reach this. The stop button deliberately does not:
+     * stopping is not the same as starting again, and conflating them was half of the
+     * mess this replaces.
+     */
+    fun restart(now: Long) {
+        state = ready(state.exerciseIndex).copy(runState = RunState.RUNNING)
+        lastTick = now
     }
 
     /** Settles the partial tick first, so the frozen value is exact, not 50ms stale. */
@@ -107,9 +155,14 @@ class TimerEngine(
         return events
     }
 
+    /**
+     * The play control. Pausing when running, otherwise [resume] — which never changes the
+     * stage, so a paused rest resumes as a rest.
+     */
     fun toggle(now: Long): List<SessionEvent> =
-        if (state.runState == RunState.RUNNING) pause(now) else start(now)
+        if (state.runState == RunState.RUNNING) pause(now) else resume(now)
 
+    /** Back to the timer, loaded and ready, not running. The stop button, and voice "stop". */
     fun reset(now: Long) {
         state = ready(state.exerciseIndex)
         lastTick = now
@@ -164,7 +217,9 @@ class TimerEngine(
         val first = before / interval + 1
         val last = after / interval
         if (last < first) return emptyList()
-        val count = (last - first + 1).coerceAtMost(MAX_REMINDERS)
+        // coerceAtMost stays in Long because the budget is in milliseconds; List() wants
+        // an Int, so the conversion belongs here rather than on the constant.
+        val count = (last - first + 1).coerceAtMost(MAX_REMINDERS).toInt()
         return List(count) { SessionEvent.RestReminder((first + it) * interval) }
     }
 

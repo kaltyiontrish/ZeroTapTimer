@@ -71,7 +71,7 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
     private val _commandPulse = MutableStateFlow(0)
     val commandPulse: StateFlow<Int> = _commandPulse.asStateFlow()
 
-    private val sounds = SoundPlayer()
+    private val sounds = SoundPlayer(app)
 
     // Debug-only clock multiplier, see [clock].
     private val _timeScale = MutableStateFlow(1f)
@@ -126,16 +126,30 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
             settings
                 .map { it.steps }
                 .distinctUntilChanged()
-                .collect { steps ->
-                    engine = TimerEngine(steps)
-                    _state.value = engine.state
+                .collect {
+                    // A rebuild makes a brand new engine, whose state is ready(0): the first
+                    // timer, idle, rest at zero. Doing that mid-session throws away the
+                    // countdown and jumps the user back to the top. A settings change is not
+                    // a reason to lose your place, so a live session keeps the list it
+                    // started with and picks the new one up the next time it is built.
+                    if (engine.state.runState == RunState.IDLE) {
+                        engine = newEngine(repo.settings.value)
+                        _state.value = engine.state
+                    } else {
+                        Log.i("TimerViewModel", "steps changed mid-session, keeping live engine")
+                    }
                 }
         }
 
         viewModelScope.launch {
             while (isActive) {
                 delay(TICK_MS)
-                onTick()
+                // A throw here would end this coroutine, and `isActive` would then be
+                // false forever: the timer would accept commands and display a change
+                // once, then never move again. One bad frame must not be able to do that.
+                runCatching { onTick() }.onFailure {
+                    Log.e(TAG, "tick failed, the clock would have stopped", it)
+                }
             }
         }
     }
@@ -144,19 +158,33 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggle() = consume(engine.toggle(clock()))
 
-    fun play() = consume(engine.start(clock()))
-
     fun pause() = consume(engine.pause(clock()))
 
-    fun reset() {
+    fun resume() = consume(engine.resume(clock()))
+
+    /**
+     * Stop: back to the timer, loaded and ready, **not running**. What the stop button
+     * does, and voice "stop". Deliberately does not start anything, so ending a rest is
+     * a separate decision from beginning the next exercise.
+     */
+    fun stop() {
         engine.reset(clock())
-        _state.value = engine.state
+        publish()
+    }
+
+    /**
+     * Run this exercise again from the top, leaving any rest. Voice only now that the
+     * button is Stop: "start" and "restart" reach this, the button does not.
+     */
+    fun restart() {
+        engine.restart(clock())
+        publish()
     }
 
     /** Pick an exercise from the row of buttons under the play control. */
     fun select(index: Int) {
         engine.select(index, clock())
-        _state.value = engine.state
+        publish()
     }
 
     fun setVoiceEnabled(on: Boolean) {
@@ -205,31 +233,38 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- timer plumbing ------------------------------------------------------------
 
-    private fun onTick() {
-        val events = engine.tick(clock())
+    private fun onTick() = consume(engine.tick(clock()))
+
+    /** The single place engine state reaches the UI. */
+    private fun publish() {
         _state.value = engine.state
-        consume(events)
     }
 
     /** Routes a manual command's events through the same path the timer loop uses. */
     private fun consume(events: List<SessionEvent>) {
-        _state.value = engine.state
+        publish()
         for (e in events) {
             when (e) {
                 is SessionEvent.ExerciseEnded -> exerciseEnded()
-                is SessionEvent.ExerciseStarted -> Unit
                 is SessionEvent.RestReminder -> restReminder()
             }
         }
     }
 
     private fun applyVoice(m: VoiceMatch) {
+        // Logged before and after: a command that does nothing is invisible otherwise,
+        // and this is the only place the reason a word had no effect can be seen.
+        Log.i(TAG, "voice ${m.command} from ${engine.state}")
         when (m.command) {
-            VoiceCommand.START -> if (engine.state.runState != RunState.RUNNING) play()
+            // "start" during a rest means "I am done resting": run the exercise again.
+            // Anywhere else it only makes sure the clock is moving, so it can never end a
+            // rest by accident the way it used to.
+            VoiceCommand.START ->
+                if (engine.state.stage == Stage.REST) restart() else resume()
             VoiceCommand.RESTART -> restart()
             VoiceCommand.PAUSE -> pause()
-            VoiceCommand.CONTINUE -> if (engine.state.runState == RunState.PAUSED) play()
-            VoiceCommand.STOP -> reset()
+            VoiceCommand.CONTINUE -> resume()
+            VoiceCommand.STOP -> stop()
             // "one".."twenty" load that exercise. The position comes from which number
             // word matched, so there is no need for twenty separate commands.
             VoiceCommand.SELECT -> {
@@ -237,12 +272,7 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
                 if (index >= 0) select(index)
             }
         }
-    }
-
-    /** Reload the current exercise from its full length and start it. */
-    fun restart() {
-        engine.reset(clock())
-        play()
+        Log.i(TAG, "voice ${m.command} -> ${engine.state}")
     }
 
     /**
@@ -296,6 +326,7 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
+        const val TAG = "TimerViewModel"
         const val TICK_MS = 50L
 
         val PULSE_ATTRS: AudioAttributes = AudioAttributes.Builder()

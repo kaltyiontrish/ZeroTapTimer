@@ -10,21 +10,26 @@ data class Step(
 )
 
 /**
- * End-of-timer sounds. Each is synthesized in [com.timergym.sound.Cues]
- * rather than shipped as an audio file, so there are no binary assets in the repo.
+ * End-of-timer sounds. Each is an MP3 in `app/src/main/assets/sounds`, named after its
+ * enum constant, so [asset] is derived rather than written out twice.
  *
  * The enum names never change, because they are what gets written to storage; only the
  * [display] strings are user-facing.
  */
 enum class Sound(val display: String) {
-    BELL("Chime"),
-    GONG("Gong"),
-    BEEP("Bleep"),
-    DOUBLE_PING("Double ping"),
-    ARPEGGIO("Rise"),
-    DESCENDING("Fall"),
-    WOOD_BLOCK("Wood block"),
-    BUZZER("Horn"),
+    BELL("Bell"),
+    BELL_2("Bell 2"),
+    BUZZER("Buzzer"),
+    DOUBLE_BELL("Double bell"),
+    FAH("Fah"),
+    NOTIFICATION_1("Notification 1"),
+    POP("Pop"),
+    SUS("Sus"),
+    WOW("Wow"),
+    ;
+
+    /** Where the audio lives in the APK. */
+    val asset: String get() = "sounds/$name.mp3"
 }
 
 data class AppSettings(

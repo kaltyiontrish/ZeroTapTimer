@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
@@ -89,7 +89,7 @@ fun TimerScreen(
     settings: AppSettings,
     onToggle: () -> Unit,
     onSelect: (Int) -> Unit,
-    onRestart: () -> Unit,
+    onStop: () -> Unit,
     onToggleMic: () -> Unit,
     micListening: Boolean,
     commandPulse: Int = 0,
@@ -145,7 +145,9 @@ fun TimerScreen(
                     color = accent,
                 )
                 Text(
-                    text = if (resting) "press start when ready" else "${step.seconds}s",
+                    // The play control never ends a rest, so pointing at it here was wrong.
+                    // Stop is what ends one.
+                    text = if (resting) "press stop when ready" else "${step.seconds}s",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -173,7 +175,7 @@ fun TimerScreen(
             micListening = micListening,
             onToggleMic = onToggleMic,
             onToggle = onToggle,
-            onRestart = onRestart,
+            onStop = onStop,
         )
     }
 }
@@ -232,7 +234,7 @@ private fun ControlRow(
     micListening: Boolean,
     onToggleMic: () -> Unit,
     onToggle: () -> Unit,
-    onRestart: () -> Unit,
+    onStop: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -267,11 +269,10 @@ private fun ControlRow(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                // "Start" on a paused timer was a lie: it was already started. The voice
-                // commands have always called this "continue", so the button agrees.
                 text = when {
                     running -> "Pause"
-                    paused -> "Resume"
+                    // Matches the word you say out loud, which used to be "Resume" here.
+                    paused -> "Continue"
                     else -> "Start"
                 },
                 fontSize = 18.sp,
@@ -282,8 +283,8 @@ private fun ControlRow(
                 softWrap = false,
             )
         }
-        FilledTonalIconButton(onClick = onRestart, modifier = Modifier.size(56.dp)) {
-            Icon(Icons.Filled.Refresh, contentDescription = "Restart")
+        FilledTonalIconButton(onClick = onStop, modifier = Modifier.size(56.dp)) {
+            Icon(Icons.Filled.Stop, contentDescription = "Stop and reset the timer")
         }
     }
 }

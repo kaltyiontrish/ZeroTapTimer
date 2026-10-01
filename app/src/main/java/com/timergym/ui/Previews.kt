@@ -44,7 +44,7 @@ private fun Sample(state: SessionState) = TimerScreen(
     settings = sampleSettings,
     onToggle = {},
     onSelect = {},
-    onRestart = {},
+    onStop = {},
     onToggleMic = {},
     micListening = false,
 )
@@ -122,6 +122,11 @@ private fun Exercises() = Frame {
 private fun Settings() = Frame {
     SettingsSheet(
         settings = sampleSettings,
+        session = SessionState(
+            runState = RunState.RUNNING,
+            exerciseDurationMs = 45_000,
+            exerciseRemainingMs = 27_400,
+        ),
         micListening = true,
         debugTools = true,
         timeScale = 1f,

@@ -87,7 +87,7 @@ $xml = @"
     android:viewportHeight="108">
 
     <path
-        android:fillColor="#2EE6A8"
+        android:fillColor="#FFFFFF"
         android:fillType="nonZero"
         android:pathData="$out" />
 </vector>
