@@ -265,10 +265,10 @@ class TimerViewModel(app: Application) : AndroidViewModel(app) {
             VoiceCommand.PAUSE -> pause()
             VoiceCommand.CONTINUE -> resume()
             VoiceCommand.STOP -> stop()
-            // "one".."twenty" load that exercise. The position comes from which number
-            // word matched, so there is no need for twenty separate commands.
+            // "one".."twenty" load that timer, each behind the "swap" prefix. The keyword is
+            // "swap three"; the position is the number word inside it.
             VoiceCommand.SELECT -> {
-                val index = NUMBER_WORDS.indexOf(m.keyword)
+                val index = NUMBER_WORDS.indexOf(m.keyword.substringAfterLast(' '))
                 if (index >= 0) select(index)
             }
         }

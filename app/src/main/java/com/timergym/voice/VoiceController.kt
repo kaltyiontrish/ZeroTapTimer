@@ -99,7 +99,12 @@ class VoiceController(
         if (modelDir == null) return fail("model missing from assets")
         step("model unpacked at $modelDir")
 
-        val loaded = model ?: runCatching { Model(modelDir) }.getOrNull().also { model = it }
+        // getOrNull() threw away the reason, so a bad grammar, a bad model and a bad rate
+        // all surfaced as the same one line with nothing to act on. Keep the cause.
+        val loaded = model
+            ?: runCatching { Model(modelDir) }.onFailure { t ->
+                Log.e(TAG, "model failed to load", t)
+            }.getOrNull()?.also { model = it }
         if (loaded == null) return fail("model failed to load")
         step("model loaded")
 
@@ -114,10 +119,12 @@ class VoiceController(
                 // silence, so the timings belong here rather than in a hand-rolled gate.
                 setEndpointerDelays(ENDPOINT_START, ENDPOINT_END, ENDPOINT_MAX)
             }
-        }.getOrNull()
-        if (recognizer == null) {
+        }.getOrElse { t ->
+            Log.e(TAG, "recogniser failed to start, grammar = ${grammarJson()}", t)
             recorder.release()
-            return fail("recogniser failed to start")
+            return fail(
+                "recogniser failed to start: ${t.javaClass.simpleName}: ${t.message ?: "no message"}",
+            )
         }
         step("listening, grammar = ${grammarJson()}")
 

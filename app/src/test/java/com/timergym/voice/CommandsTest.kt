@@ -26,26 +26,51 @@ class CommandsTest {
     }
 
     @Test
-    fun `number words select an exercise by position`() {
-        // "two" has to give back its position, not just that it is a number.
-        assertEquals(0, match("one")?.let { NUMBER_WORDS.indexOf(it.keyword) })
-        assertEquals(1, match("two")?.let { NUMBER_WORDS.indexOf(it.keyword) })
-        assertEquals(4, match("five")?.let { NUMBER_WORDS.indexOf(it.keyword) })
-        assertEquals(11, match("twelve")?.let { NUMBER_WORDS.indexOf(it.keyword) })
-        assertEquals(19, match("twenty")?.let { NUMBER_WORDS.indexOf(it.keyword) })
+    fun `swap number words select a timer by position`() {
+        // "swap two" has to give back its position, not just that it is a number.
+        fun position(phrase: String) =
+            match(phrase)?.let { NUMBER_WORDS.indexOf(it.keyword.substringAfterLast(' ')) }
+        assertEquals(0, position("swap one"))
+        assertEquals(1, position("swap two"))
+        assertEquals(4, position("swap five"))
+        assertEquals(11, position("swap twelve"))
+        assertEquals(19, position("swap twenty"))
+    }
+
+    /**
+     * The reason the prefix exists. A bare number in the grammar is a false trigger waiting
+     * to happen over music, so none of them may match on their own any more.
+     */
+    @Test
+    fun `a bare number is not a command`() {
+        for (word in NUMBER_WORDS) {
+            assertNull("\"$word\" must not trigger on its own", command(word))
+        }
+        assertNull(command("go to three"))
+    }
+
+    @Test
+    fun `the swap prefix alone is not a command`() {
+        assertNull(command("swap"))
+        assertNull(command("swap the timer"))
     }
 
     @Test
     fun `number words are not confused with commands`() {
-        // "one" and "stop" are unrelated, and the earliest word still wins.
-        assertEquals(VoiceCommand.SELECT, command("one"))
         assertEquals(VoiceCommand.STOP, command("stop"))
-        assertEquals(VoiceCommand.SELECT, command("go to three"))
+        assertEquals(VoiceCommand.SELECT, command("swap three"))
     }
 
     @Test
     fun `a number past twenty is not a command`() {
         assertNull(command("twenty one"))
+        assertNull(command("swap twenty one"))
+    }
+
+    @Test
+    fun `swap does not disturb the other commands`() {
+        assertEquals(VoiceCommand.PAUSE, command("swap the timer pause"))
+        assertEquals(VoiceCommand.SELECT, command("swap two pause"))
     }
 
     @Test
@@ -98,15 +123,47 @@ class CommandsTest {
         assertTrue("grammar needs [unk] to reject noise: $grammar", grammar.contains("\"[unk]\""))
     }
 
+    /**
+     * The invariant that actually breaks: anything the grammar can emit must map to a
+     * command, and every keyword must reach the grammar. Iterating KEYWORDS rather than
+     * re-parsing the JSON means this cannot drift out of step with the table.
+     */
     @Test
-    fun `the grammar contains no word the matcher does not know`() {
-        // Anything in the grammar that match() cannot interpret is a wasted decode slot.
-        val words = grammarJson()
-            .removePrefix("[").removeSuffix("]").split(",")
-            .map { it.trim().trim('"') }.filter { it.isNotEmpty() }
-        assertTrue("grammar needs [unk]", words.contains("[unk]"))
-        for (word in words.filter { it != "[unk]" }) {
-            assertNotNull("\"$word\" is in the grammar but matches nothing", match(word))
+    fun `every keyword reaches the grammar and maps back to its command`() {
+        val grammar = grammarJson()
+        assertTrue("grammar needs [unk] to reject noise: $grammar", grammar.contains("\"[unk]\""))
+        for ((command, keywords) in KEYWORDS) {
+            for (keyword in keywords) {
+                assertTrue(
+                    "\"$keyword\" is missing from the grammar: $grammar",
+                    grammar.contains("\"$keyword\""),
+                )
+                val m = match(keyword)
+                assertNotNull("\"$keyword\" is a keyword but matches nothing", m)
+                assertEquals("\"$keyword\" mapped to the wrong command", command, m?.command)
+            }
         }
+    }
+
+    /**
+     * The grammar format, pinned because the failure is silent and misleading: a malformed
+     * grammar does not fall back, it makes the Recogniser constructor throw, which the app
+     * reports as "recogniser failed to start" with nothing pointing at the grammar.
+     */
+    @Test
+    fun `grammar is a flat list with phrases spelled out as words`() {
+        val grammar = grammarJson()
+        assertTrue(
+            "phrases must be space joined: $grammar",
+            grammar.contains("\"swap one\""),
+        )
+        assertTrue("single words stay bare: $grammar", grammar.contains("\"pause\""))
+        // Flat list. A nested array is the format that is easiest to reach for and the
+        // official grammar never uses one, so it is pinned here explicitly.
+        assertTrue(
+            "grammar must not nest an array: $grammar",
+            !grammar.drop(1).dropLast(1).contains("["),
+        )
+        assertTrue("grammar must end with [unk]: $grammar", grammar.endsWith("\"[unk]\"]"))
     }
 }
