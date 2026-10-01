@@ -1,4 +1,7 @@
-<img width="347" height="651" alt="image" src="https://github.com/user-attachments/assets/fa3c6347-60e1-4e88-8cdf-0cde6d425a47" />
+<img width="312" height="649" alt="Screen_1" src="https://github.com/user-attachments/assets/52c1d4f3-13a2-4c23-ab5f-8774763d73f0" /><img width="312" height="649" alt="Screen_2" src="https://github.com/user-attachments/assets/a4e76a2f-29f0-44b9-a317-c73fccacd863" /><img width="312" height="649" alt="Screen_3" src="https://github.com/user-attachments/assets/33ea0594-f7ba-4f4c-af2a-61f99e8a9b45" />
+
+
+
 
 # ZeroTapTimer (Human Description) 
 ## Its a basic Timer for gym exercises that allows you to create several timers and jump between them with voice commands.
