@@ -1,18 +1,23 @@
-<img width="347" height="651" alt="image" src="https://github.com/user-attachments/assets/fa3c6347-60e1-4e88-8cdf-0cde6d425a47" />
+<img width="312" height="649" alt="Screen_1" src="https://github.com/user-attachments/assets/52c1d4f3-13a2-4c23-ab5f-8774763d73f0" /><img width="312" height="649" alt="Screen_2" src="https://github.com/user-attachments/assets/a4e76a2f-29f0-44b9-a317-c73fccacd863" /><img width="312" height="649" alt="Screen_3" src="https://github.com/user-attachments/assets/33ea0594-f7ba-4f4c-af2a-61f99e8a9b45" />
+
+
+
 
 # ZeroTapTimer (Human Description) 
-Its a basic Timer for gym exercises that allows you to create several timers and jump between them with voice commands.
-// Start - Starts timer
-// Pause - Pause timer
-// Continue/Resume - Resumes the timer
-// Reset - Reset timer and automatically starts 
-// Stop - Reset timer and waits for human instructions.
+## Its a basic Timer for gym exercises that allows you to create several timers and jump between them with voice commands.
+
+- **Start** - Starts timer
+- **Pause** - Pause timer
+- **Continue/Resume** - Resumes the timer
+- **Stop** - Reset timer
+- **Reset** - Reset timer and automatically starts 
+- **Swap one** // **Swap two** and so one will change the current timer to any timer at that position (From left to right). 
 
 After the end of any timer it starts counting the rest period.
 Thats basically it! There are more features but you have to read the AI bs bellow! ;)
 
 // Ai description
-# ZeroTapTimer
+# ZeroTapTimer        
 
 An Android interval timer for workouts. Kotlin + Jetpack Compose, **no third-party
 dependencies** — Vosk is the one library, and it runs fully on-device. The end-of-timer
